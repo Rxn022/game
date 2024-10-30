@@ -4,6 +4,7 @@
 ### Solo Project
 ```
 ```
-Code Quiz!
+3D Interactive Runner
 
+## Support us by following!
 
