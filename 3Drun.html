@@ -1,0 +1,354 @@
+<html><head><base href="https://3dhuman-interactive3dviewer"><title>Interactive 3D Human Models on Endless Street</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #info { position: absolute; top: 10px; width: 100%; text-align: center; color: #ffffff; z-index: 100; text-shadow: 1px 1px 1px #000000; }
+  #controls { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.5); color: #ffffff; padding: 10px; border-radius: 5px; max-height: 90vh; overflow-y: auto; width: 250px; }
+  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ffffff; font-size: 24px; }
+  #speedControl, #directionControl, #modelControls { margin-top: 10px; }
+  #speedValue { display: inline-block; width: 30px; text-align: right; }
+  .modelButton { margin: 5px; }
+  #moveControls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); }
+  .moveButton { font-size: 24px; padding: 10px 20px; margin: 0 10px; }
+</style>
+</head>
+<body>
+<div id="info">Interactive 3D Human Models on Endless Street</div>
+<div id="loading">Loading 3D Models...</div>
+<div id="controls">
+  <button id="toggleWireframe">Toggle Wireframe</button>
+  <div id="speedControl">
+    <label for="speed">Speed: </label>
+    <input type="range" id="speed" min="0" max="2" step="0.1" value="0.3">
+    <span id="speedValue">0.3</span>
+  </div>
+  <div id="directionControl">
+    <label for="direction">Direction: </label>
+    <select id="direction">
+      <option value="away">Away</option>
+      <option value="towards">Towards</option>
+    </select>
+  </div>
+  <div id="modelControls">
+    <button id="addModel">Add Model</button>
+    <div id="modelButtons"></div>
+  </div>
+</div>
+<div id="moveControls">
+  <button id="moveLeft" class="moveButton">←</button>
+  <button id="moveRight" class="moveButton">→</button>
+</div>
+
+<script>
+let scene, camera, renderer, controls, clock;
+let directionalLight, ambientLight;
+let streetSpeed = 0.3;
+let streetElements = [];
+let modelSpeed = 1.5;
+let runningDirection = 1; // 1 for away, -1 for towards
+let models = [];
+let modelCounter = 0;
+let lateralMovement = 0;
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  clock = new THREE.Clock();
+
+  // Lighting
+  ambientLight = new THREE.AmbientLight(0x404040);
+  scene.add(ambientLight);
+  
+  directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+  directionalLight.position.set(1, 1, 1);
+  directionalLight.castShadow = true;
+  directionalLight.shadow.mapSize.width = 1024;
+  directionalLight.shadow.mapSize.height = 1024;
+  directionalLight.shadow.camera.near = 0.5;
+  directionalLight.shadow.camera.far = 500;
+  scene.add(directionalLight);
+
+  // Endless Street
+  createEndlessStreet();
+
+  // Camera position
+  camera.position.set(0, 2, 5);
+  controls.update();
+
+  // Add initial models
+  addModel();
+  addModel();
+
+  // Add event listeners
+  document.getElementById('toggleWireframe').addEventListener('click', toggleWireframe);
+  document.getElementById('speed').addEventListener('input', updateSpeed);
+  document.getElementById('direction').addEventListener('change', updateDirection);
+  document.getElementById('addModel').addEventListener('click', addModel);
+  document.getElementById('moveLeft').addEventListener('click', () => moveLateral(-0.5));
+  document.getElementById('moveRight').addEventListener('click', () => moveLateral(0.5));
+
+  animate();
+}
+
+function addModel() {
+  const colors = [0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF];
+  const color = colors[modelCounter % colors.length];
+  const x = (Math.random() - 0.5) * 4;
+  const z = (Math.random() - 0.5) * 4;
+  loadHumanModel('https://threejs.org/examples/models/gltf/Xbot.glb', color, x, 0.5, z, modelCounter);
+  modelCounter++;
+}
+
+function loadHumanModel(url, color, x, y, z, modelId) {
+  const loader = new THREE.GLTFLoader();
+  loader.load(
+    url,
+    function (gltf) {
+      const humanModel = gltf.scene;
+      humanModel.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.material.color.setHex(color);
+        }
+      });
+      humanModel.position.set(x, y, z);
+      humanModel.rotation.y = Math.PI;
+      scene.add(humanModel);
+
+      // Set up animations
+      const mixer = new THREE.AnimationMixer(humanModel);
+      const runAction = mixer.clipAction(gltf.animations[3]);
+      runAction.play();
+      runAction.setEffectiveTimeScale(modelSpeed);
+
+      const model = { id: modelId, model: humanModel, mixer: mixer, action: runAction };
+      models.push(model);
+
+      // Add button to control panel
+      const modelButtons = document.getElementById('modelButtons');
+      const button = document.createElement('button');
+      button.textContent = `×`;
+      button.className = 'modelButton';
+      button.title = `Remove Model ${modelId + 1}`;
+      button.addEventListener('click', () => removeModel(modelId));
+      modelButtons.appendChild(button);
+
+      if (document.getElementById('loading')) {
+        document.getElementById('loading').style.display = 'none';
+      }
+    },
+    function (xhr) {
+      console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+    },
+    function (error) {
+      console.error('An error happened', error);
+    }
+  );
+}
+
+function removeModel(modelId) {
+  const index = models.findIndex(m => m.id === modelId);
+  if (index !== -1) {
+    const model = models[index];
+    scene.remove(model.model);
+    models.splice(index, 1);
+
+    // Remove button from control panel
+    const button = document.querySelector(`button[title="Remove Model ${modelId + 1}"]`);
+    if (button) {
+      button.remove();
+    }
+  }
+}
+
+function createEndlessStreet() {
+  const roadWidth = 10;
+  const roadLength = 100;
+  const segmentCount = 20;
+
+  for (let i = -segmentCount / 2; i < segmentCount / 2; i++) {
+    const segment = createStreetSegment(roadWidth, roadLength);
+    segment.position.z = i * roadLength;
+    scene.add(segment);
+    streetElements.push(segment);
+  }
+}
+
+function createStreetSegment(width, length) {
+  const segment = new THREE.Group();
+
+  // Road
+  const roadGeometry = new THREE.PlaneGeometry(width, length);
+  const roadMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+  const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+  roadMesh.rotation.x = -Math.PI / 2;
+  roadMesh.receiveShadow = true;
+  segment.add(roadMesh);
+
+  // Sidewalks
+  const sidewalkWidth = 3;
+  const sidewalkGeometry = new THREE.PlaneGeometry(sidewalkWidth, length);
+  const sidewalkMaterial = new THREE.MeshLambertMaterial({ color: 0x999999 });
+  
+  const leftSidewalk = new THREE.Mesh(sidewalkGeometry, sidewalkMaterial);
+  leftSidewalk.position.set(-(width/2 + sidewalkWidth/2), 0.05, 0);
+  leftSidewalk.rotation.x = -Math.PI / 2;
+  leftSidewalk.receiveShadow = true;
+  segment.add(leftSidewalk);
+
+  const rightSidewalk = new THREE.Mesh(sidewalkGeometry, sidewalkMaterial);
+  rightSidewalk.position.set(width/2 + sidewalkWidth/2, 0.05, 0);
+  rightSidewalk.rotation.x = -Math.PI / 2;
+  rightSidewalk.receiveShadow = true;
+  segment.add(rightSidewalk);
+
+  // Road markings
+  const lineGeometry = new THREE.PlaneGeometry(0.2, 3);
+  const lineMaterial = new THREE.MeshLambertMaterial({ color: 0xFFFFFF });
+
+  for (let i = 0; i < 10; i++) {
+    const line = new THREE.Mesh(lineGeometry, lineMaterial);
+    line.position.set(0, 0.01, i * 10 - length/2 + 5);
+    line.rotation.x = -Math.PI / 2;
+    segment.add(line);
+  }
+
+  // Street lamps and Trees
+  addStreetLamps(segment, width, length);
+  addTrees(segment, width, length);
+
+  return segment;
+}
+
+function addStreetLamps(segment, width, length) {
+  const lampHeight = 5;
+  const lampGeometry = new THREE.CylinderGeometry(0.1, 0.1, lampHeight);
+  const lampMaterial = new THREE.MeshLambertMaterial({ color: 0x888888 });
+
+  for (let i = 0; i < 4; i++) {
+    const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
+    lamp.position.set(
+      (i % 2 === 0 ? -1 : 1) * (width / 2 + 1.5),
+      lampHeight / 2,
+      (Math.floor(i / 2) - 0.5) * length
+    );
+    segment.add(lamp);
+
+    const lampLight = new THREE.PointLight(0xFFFF88, 1, 10);
+    lampLight.position.set(0, lampHeight / 2, 0);
+    lamp.add(lampLight);
+  }
+}
+
+function addTrees(segment, width, length) {
+  const treeHeight = 3;
+  const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.2, treeHeight);
+  const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+  const leavesGeometry = new THREE.SphereGeometry(1, 8, 8);
+  const leavesMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 });
+
+  for (let i = 0; i < 8; i++) {
+    const tree = new THREE.Group();
+
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    trunk.position.y = treeHeight / 2;
+    tree.add(trunk);
+
+    const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+    leaves.position.y = treeHeight;
+    tree.add(leaves);
+
+    tree.position.set(
+      (i % 2 === 0 ? -1 : 1) * (width / 2 + 2.5),
+      0,
+      (Math.floor(i / 2) - 1.5) * (length / 3) + (Math.random() - 0.5) * 5
+    );
+
+    segment.add(tree);
+  }
+}
+
+function toggleWireframe() {
+  models.forEach(model => {
+    model.model.traverse((child) => {
+      if (child.isMesh) {
+        child.material.wireframe = !child.material.wireframe;
+      }
+    });
+  });
+}
+
+function updateSpeed() {
+  streetSpeed = parseFloat(document.getElementById('speed').value);
+  document.getElementById('speedValue').textContent = streetSpeed.toFixed(1);
+  modelSpeed = streetSpeed * 5;
+  models.forEach(model => {
+    model.action.setEffectiveTimeScale(modelSpeed);
+  });
+}
+
+function updateDirection() {
+  const direction = document.getElementById('direction').value;
+  runningDirection = direction === 'away' ? 1 : -1;
+  const rotation = runningDirection === 1 ? Math.PI : 0;
+  models.forEach(model => {
+    model.model.rotation.y = rotation;
+  });
+}
+
+function updateStreet() {
+  streetElements.forEach((segment) => {
+    segment.position.z += streetSpeed * runningDirection;
+    if (runningDirection === 1 && segment.position.z > 1000) {
+      segment.position.z -= 2000;
+    } else if (runningDirection === -1 && segment.position.z < -1000) {
+      segment.position.z += 2000;
+    }
+  });
+}
+
+function moveLateral(direction) {
+  lateralMovement += direction;
+  lateralMovement = Math.max(-4, Math.min(4, lateralMovement)); // Limit movement
+  models.forEach(model => {
+    model.model.position.x = model.model.position.x + direction;
+  });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  models.forEach(model => {
+    model.mixer.update(delta);
+  });
+
+  updateStreet();
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+window.addEventListener('resize', onWindowResize, false);
+
+init();
+</script>
+</body></html>
